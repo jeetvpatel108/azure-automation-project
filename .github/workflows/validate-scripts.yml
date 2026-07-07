@@ -1,0 +1,91 @@
+name: Validate PowerShell Scripts
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'scripts/**'
+
+jobs:
+  validate:
+    name: Validate PowerShell Scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y powershell
+
+      - name: Validate script syntax
+        shell: pwsh
+        run: |
+          Write-Host "=== PowerShell Script Validation ===" -ForegroundColor Cyan
+          $scripts = Get-ChildItem -Path ./scripts -Filter *.ps1 -Recurse
+          $hasErrors = $false
+
+          foreach ($script in $scripts) {
+              Write-Host "Checking: $($script.FullName)" -ForegroundColor Yellow
+              $errors = $null
+              [System.Management.Automation.PSParser]::Tokenize(
+                  (Get-Content $script.FullName -Raw), [ref]$errors
+              )
+
+              if ($errors.Count -gt 0) {
+                  Write-Host "  FAILED - Syntax errors found:" -ForegroundColor Red
+                  foreach ($err in $errors) {
+                      Write-Host "    Line $($err.Token.StartLine): $($err.Message)" -ForegroundColor Red
+                  }
+                  $hasErrors = $true
+              }
+              else {
+                  Write-Host "  PASSED" -ForegroundColor Green
+              }
+          }
+
+          Write-Host ""
+          if ($hasErrors) {
+              Write-Host "Validation FAILED - fix errors above." -ForegroundColor Red
+              exit 1
+          }
+          else {
+              Write-Host "All scripts passed validation." -ForegroundColor Green
+          }
+
+      - name: Check script best practices
+        shell: pwsh
+        run: |
+          Write-Host "=== Best Practices Check ===" -ForegroundColor Cyan
+          $scripts = Get-ChildItem -Path ./scripts -Filter *.ps1 -Recurse
+          $warnings = 0
+
+          foreach ($script in $scripts) {
+              $content = Get-Content $script.FullName -Raw
+
+              if ($content -notmatch '#.*Purpose|#.*Description') {
+                  Write-Host "WARNING: $($script.Name) missing Purpose/Description comment" -ForegroundColor Yellow
+                  $warnings++
+              }
+
+              if ($content -match 'ConvertTo-SecureString.*-AsPlainText') {
+                  Write-Host "WARNING: $($script.Name) contains plaintext password conversion" -ForegroundColor Yellow
+                  $warnings++
+              }
+
+              if ($content -notmatch 'try\s*\{') {
+                  Write-Host "WARNING: $($script.Name) has no try/catch error handling" -ForegroundColor Yellow
+                  $warnings++
+              }
+          }
+
+          Write-Host ""
+          Write-Host "Total warnings: $warnings" -ForegroundColor Yellow
+          Write-Host "Best practices check complete." -ForegroundColor Cyan
